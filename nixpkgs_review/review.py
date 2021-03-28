@@ -113,6 +113,7 @@ class Review:
         self.package_regex = package_regexes
         self.skip_packages = skip_packages
         self.skip_packages_regex = skip_packages_regex
+        self.pr_rev: str | None = None
         self.system = system
         self.allow = allow
         self.sandbox = sandbox
@@ -232,11 +233,13 @@ class Review:
             packages_per_system = self.github_client.get_borg_eval_gist(pr)
         else:
             packages_per_system = None
+
         merge_rev, pr_rev = fetch_refs(
             self.remote,
             pr["base"]["ref"],
             f"pull/{pr['number']}/head",
         )
+        self.pr_rev = pr_rev
 
         if self.checkout == CheckoutOption.MERGE:
             base_rev = merge_rev
@@ -279,6 +282,7 @@ class Review:
             attr,
             self.extra_nixpkgs_config,
             checkout=self.checkout.name.lower(),  # type: ignore
+            pr_rev=self.pr_rev,
         )
 
         if post_logs:

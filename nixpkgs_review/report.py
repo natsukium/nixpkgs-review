@@ -19,13 +19,17 @@ def print_number(
     msg: str,
     what: str = "package",
     log: Callable[[str], None] = warn,
+    show: int = -1,
 ) -> None:
     if len(packages) == 0:
         return
     plural = "s" if len(packages) > 1 else ""
     names = (a.name for a in packages)
     log(f"{len(packages)} {what}{plural} {msg}:")
-    log(" ".join(names))
+    if show == -1 or show > len(packages):
+        log(" ".join(names))
+    else:
+        log(" ".join(islice(names, show)) + " ...")
     log("")
 
 
@@ -104,11 +108,15 @@ class Report:
         extra_nixpkgs_config: str,
         *,
         checkout: Literal["merge", "commit"] = "merge",
+        pr_rev: str | None = None,
     ) -> None:
         self.system = system
         self.attrs = attrs
         self.checkout = checkout
+        self.pr_rev: str | None = pr_rev
+        self.skipped: list[Attr] = []
         self.broken: list[Attr] = []
+        self.timed_out: list[Attr] = []
         self.failed: list[Attr] = []
         self.non_existent: list[Attr] = []
         self.blacklisted: list[Attr] = []
@@ -125,6 +133,10 @@ class Report:
                 self.broken.append(a)
             elif a.blacklisted:
                 self.blacklisted.append(a)
+            elif a.skipped:
+                self.skipped.append(a)
+            elif a.timed_out:
+                self.timed_out.append(a)
             elif not a.exists:
                 self.non_existent.append(a)
             elif a.name.startswith("nixosTests."):
@@ -184,12 +196,15 @@ class Report:
                 "pr": pr,
                 "checkout": self.checkout,
                 "extra-nixpkgs-config": self.extra_nixpkgs_config,
+                "pr_rev": self.pr_rev,
                 "broken": serialize_attrs(self.broken),
                 "non-existent": serialize_attrs(self.non_existent),
                 "blacklisted": serialize_attrs(self.blacklisted),
                 "failed": serialize_attrs(self.failed),
-                "built": serialize_attrs(self.built),
+                "skipped": serialize_attrs(self.skipped),
+                "timed_out": serialize_attrs(self.timed_out),
                 "tests": serialize_attrs(self.tests),
+                "built": serialize_attrs(self.built),
             },
             sort_keys=True,
             indent=4,
@@ -204,7 +219,9 @@ class Report:
         if self.checkout != "merge":
             cmd += f" --checkout {self.checkout}"
 
-        msg = f"Result of `{cmd}` run on {self.system} [1](https://github.com/Mic92/nixpkgs-review)\n"
+        shortcommit = f" at {self.pr_rev[:8]}" if self.pr_rev else ""
+        link = "[1](https://github.com/Mic92/nixpkgs-review)"
+        msg = f"Result of `{cmd}`{shortcommit} run on {self.system} {link}\n"
 
         msg += html_pkgs_section(
             ":fast_forward:", self.broken, "marked as broken and skipped"
@@ -215,6 +232,10 @@ class Report:
             "present in ofBorgs evaluation, but not found in the checkout",
         )
         msg += html_pkgs_section(":fast_forward:", self.blacklisted, "blacklisted")
+        msg += html_pkgs_section(
+            ":fast_forward:", self.skipped, "skipped due to time constraints", show=10
+        )
+        msg += html_pkgs_section(":fast_forward:", self.timed_out, "timed out")
         msg += html_pkgs_section(":x:", self.failed, "failed to build")
         msg += html_pkgs_section(":white_check_mark:", self.tests, "built", what="test")
         msg += html_pkgs_section(":white_check_mark:", self.built, "built")
@@ -232,6 +253,8 @@ class Report:
             "present in ofBorgs evaluation, but not found in the checkout",
         )
         print_number(self.blacklisted, "blacklisted")
+        print_number(self.skipped, "skipped due to time constraints", show=10)
+        print_number(self.timed_out, "timed out", show=True)
         print_number(self.failed, "failed to build")
         print_number(self.tests, "built", what="tests", log=print)
-        print_number(self.built, "built", log=print)
+        print_number(self.built, "built successfully", log=print)
