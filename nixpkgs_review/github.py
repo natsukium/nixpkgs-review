@@ -1,23 +1,34 @@
 import json
+import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
 from typing import Any
 
+import backoff
+
+OWNER = "NixOS"
+REPO = "nixpkgs"
+
 
 def pr_url(pr: int) -> str:
-    return f"https://github.com/NixOS/nixpkgs/pull/{pr}"
+    return f"https://github.com/{OWNER}/{REPO}/pull/{pr}"
 
 
 class GithubClient:
     def __init__(self, api_token: str | None) -> None:
         self.api_token = api_token
 
+    @backoff.on_exception(backoff.expo, urllib.error.HTTPError, max_time=60)
     def _request(
         self, path: str, method: str, data: dict[str, Any] | None = None
     ) -> Any:
         url = urllib.parse.urljoin("https://api.github.com/", path)
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/vnd.github.v3+json",
+        }
         if self.api_token:
             headers["Authorization"] = f"token {self.api_token}"
 
@@ -26,13 +37,22 @@ class GithubClient:
             body = json.dumps(data).encode("ascii")
 
         req = urllib.request.Request(url, headers=headers, method=method, data=body)
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            print(f"Url: {url}", file=sys.stderr)
+            print(f"Code: {e.code}", file=sys.stderr)
+            print(f"Reason: {e.reason}", file=sys.stderr)
+            print(f"Headers: {e.headers}", file=sys.stderr)
+            print(f"Request data: {data}", file=sys.stderr)
+            print(f"Response: {e.read().decode('utf-8')}", file=sys.stderr)
+            raise
 
     def get(self, path: str) -> Any:
         return self._request(path, "GET")
 
-    def post(self, path: str, data: dict[str, str]) -> Any:
+    def post(self, path: str, data: dict[str, Any]) -> Any:
         return self._request(path, "POST", data)
 
     def put(self, path: str) -> Any:
@@ -42,21 +62,21 @@ class GithubClient:
         "Post a comment on a PR with nixpkgs-review report"
         print(f"Posting result comment on {pr_url(pr)}")
         return self.post(
-            f"/repos/NixOS/nixpkgs/issues/{pr}/comments", data={"body": msg}
+            f"/repos/{OWNER}/{REPO}/issues/{pr}/comments", data={"body": msg}
         )
 
     def approve_pr(self, pr: int) -> Any:
         "Approve a PR"
         print(f"Approving {pr_url(pr)}")
         return self.post(
-            f"/repos/NixOS/nixpkgs/pulls/{pr}/reviews",
+            f"/repos/{OWNER}/{REPO}/pulls/{pr}/reviews",
             data={"event": "APPROVE"},
         )
 
     def merge_pr(self, pr: int) -> Any:
         "Merge a PR. Requires maintainer access to NixPkgs"
         print(f"Merging {pr_url(pr)}")
-        return self.put(f"/repos/NixOS/nixpkgs/pulls/{pr}/merge")
+        return self.put(f"/repos/{OWNER}/{REPO}/pulls/{pr}/merge")
 
     def graphql(self, query: str) -> dict[str, Any]:
         resp = self.post("/graphql", data={"query": query})
@@ -67,7 +87,7 @@ class GithubClient:
 
     def pull_request(self, number: int) -> Any:
         "Get a pull request"
-        return self.get(f"repos/NixOS/nixpkgs/pulls/{number}")
+        return self.get(f"repos/{OWNER}/{REPO}/pulls/{number}")
 
     def get_borg_eval_gist(self, pr: dict[str, Any]) -> dict[str, set[str]] | None:
         packages_per_system: defaultdict[str, set[str]] = defaultdict(set)
@@ -98,3 +118,12 @@ class GithubClient:
 
                 return packages_per_system
         return None
+
+    def upload_gist(self, name: str, content: str, description: str) -> dict[str, Any]:
+        data = {
+            "files": {name: {"content": content}},
+            "public": True,
+            "description": description,
+        }
+        resp: dict[str, Any] = self.post("/gists", data=data)
+        return resp
