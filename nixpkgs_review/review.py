@@ -126,7 +126,9 @@ class Review:
 
     def git_merge(self, commit: str) -> None:
         res = sh(
-            ["git", "merge", "--no-commit", "--no-ff", commit], cwd=self.worktree_dir()
+            ["git", "merge", "--no-commit", "--no-ff", commit],
+            cwd=self.worktree_dir(),
+            stderr=sys.stdout,
         )
         if res.returncode != 0:
             raise NixpkgsReviewError(
@@ -145,7 +147,9 @@ class Review:
             sys.exit(0)
 
         info("Applying `nixpkgs` diff...")
-        result = subprocess.run(["git", "apply"], cwd=self.worktree_dir(), input=diff)
+        result = subprocess.run(
+            ["git", "apply"], cwd=self.worktree_dir(), input=diff, stderr=sys.stdout
+        )
 
         if result.returncode != 0:
             warn(f"Failed to apply diff in {self.worktree_dir()}")
@@ -180,10 +184,13 @@ class Review:
         changed_pkgs, removed_pkgs = differences(base_packages, merged_packages)
         changed_attrs = set(p.attr_path for p in changed_pkgs)
         print_updates(changed_pkgs, removed_pkgs)
+
         return self.build(changed_attrs, self.build_args)
 
     def git_worktree(self, commit: str) -> None:
-        res = sh(["git", "worktree", "add", self.worktree_dir(), commit])
+        res = sh(
+            ["git", "worktree", "add", self.worktree_dir(), commit], stderr=sys.stdout
+        )
         if res.returncode != 0:
             raise NixpkgsReviewError(
                 f"Failed to add worktree for {commit} in {self.worktree_dir()}. git worktree failed with exit code {res.returncode}"
@@ -247,6 +254,7 @@ class Review:
             run = subprocess.run(
                 ["git", "merge-base", merge_rev, pr_rev],
                 stdout=subprocess.PIPE,
+                stderr=sys.stdout,
                 text=True,
             )
             if run.returncode != 0:
@@ -539,7 +547,7 @@ def fetch_refs(repo: str, *refs: str) -> list[str]:
     cmd = ["git", "-c", "fetch.prune=false", "fetch", "--no-tags", "--force", repo]
     for i, ref in enumerate(refs):
         cmd.append(f"{ref}:refs/nixpkgs-review/{i}")
-    res = sh(cmd)
+    res = sh(cmd, stderr=sys.stdout)
     if res.returncode != 0:
         raise NixpkgsReviewError(
             f"Failed to fetch {refs} from {repo}. git fetch failed with exit code {res.returncode}"
@@ -547,7 +555,7 @@ def fetch_refs(repo: str, *refs: str) -> list[str]:
     shas = []
     for i, ref in enumerate(refs):
         cmd = ["git", "rev-parse", "--verify", f"refs/nixpkgs-review/{i}"]
-        out = subprocess.run(cmd, text=True, stdout=subprocess.PIPE)
+        out = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=sys.stdout)
         if out.returncode != 0:
             raise NixpkgsReviewError(
                 f"Failed to fetch {ref} from {repo} with command: {''.join(cmd)}"
