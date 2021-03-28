@@ -268,6 +268,7 @@ class Review:
         post_result: bool | None = False,
         print_result: bool = False,
         post_logs: bool | None = False,
+        prefer_edit: bool | None = False,
     ) -> bool:
         os.environ.pop("NIXPKGS_CONFIG", None)
         os.environ["NIXPKGS_REVIEW_ROOT"] = str(path)
@@ -287,7 +288,12 @@ class Review:
         report.write(path, pr)
 
         if pr and post_result:
-            self.github_client.comment_issue(pr, report.markdown(pr))
+            if prefer_edit:
+                self.github_client.comment_or_update_prior_comment_issue(
+                    pr, report.markdown(pr)
+                )
+            else:
+                self.github_client.comment_issue(pr, report.markdown(pr))
 
         if print_result:
             print(report.markdown(pr))

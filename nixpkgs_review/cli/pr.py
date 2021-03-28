@@ -80,7 +80,13 @@ def pr_command(args: argparse.Namespace) -> str:
 
         all_succeeded = all(
             review.start_review(
-                attrs, path, pr, args.post_result, args.print_result, args.post_logs
+                attrs,
+                path,
+                pr,
+                args.post_result,
+                args.print_result,
+                args.post_logs,
+                args.prefer_edit,
             )
             for pr, path, attrs in contexts
         )
