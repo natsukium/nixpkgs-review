@@ -347,6 +347,7 @@ class Review:
         pr: int | None = None,
         post_result: bool | None = False,
         print_result: bool = False,
+        post_logs: bool | None = False,
     ) -> bool:
         os.environ.pop("NIXPKGS_CONFIG", None)
         os.environ["NIXPKGS_REVIEW_ROOT"] = str(path)
@@ -358,6 +359,10 @@ class Review:
             checkout=self.checkout.name.lower(),  # type: ignore[arg-type]
             show_header=self.show_header,
         )
+
+        if post_logs:
+            report.upload_build_logs(self.github_client, pr)
+
         report.print_console(pr)
         report.write(path, pr)
 

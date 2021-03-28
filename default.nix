@@ -18,7 +18,11 @@ python3Packages.buildPythonApplication {
   nativeBuildInputs = [
     installShellFiles
   ] ++ lib.optional withAutocomplete python3Packages.argcomplete;
-  dependencies = with python3Packages; [ argcomplete ];
+  dependencies = with python3Packages; [
+    argcomplete
+    humanize
+    backoff
+  ];
 
   nativeCheckInputs =
     [
@@ -46,6 +50,7 @@ python3Packages.buildPythonApplication {
         [
           pkgs.nixVersions.stable or nix_2_4
           git
+          coreutils
         ]
         ++ lib.optional withSandboxSupport bubblewrap
         ++ lib.optional withNom' nix-output-monitor;

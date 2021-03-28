@@ -11,9 +11,14 @@ from typing import IO, Any, override
 
 from .utils import System, warn
 
+import backoff
+
+OWNER = "NixOS"
+REPO = "nixpkgs"
+
 
 def pr_url(pr: int) -> str:
-    return f"https://github.com/NixOS/nixpkgs/pull/{pr}"
+    return f"https://github.com/{OWNER}/{REPO}/pull/{pr}"
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -43,6 +48,7 @@ class GithubClient:
         if self.api_token:
             self.headers["Authorization"] = f"token {self.api_token}"
 
+    @backoff.on_exception(backoff.expo, urllib.error.HTTPError, max_time=60)
     def _request(
         self,
         path: str,
@@ -67,7 +73,7 @@ class GithubClient:
     def get(self, path: str) -> Any:
         return self._request(path, "GET")
 
-    def post(self, path: str, data: dict[str, str]) -> Any:
+    def post(self, path: str, data: dict[str, Any]) -> Any:
         return self._request(path, "POST", data)
 
     def put(self, path: str) -> Any:
@@ -77,21 +83,21 @@ class GithubClient:
         "Post a comment on a PR with nixpkgs-review report"
         print(f"Posting result comment on {pr_url(pr)}")
         return self.post(
-            f"/repos/NixOS/nixpkgs/issues/{pr}/comments", data={"body": msg}
+            f"/repos/{OWNER}/{REPO}/issues/{pr}/comments", data={"body": msg}
         )
 
     def approve_pr(self, pr: int) -> Any:
         "Approve a PR"
         print(f"Approving {pr_url(pr)}")
         return self.post(
-            f"/repos/NixOS/nixpkgs/pulls/{pr}/reviews",
+            f"/repos/{OWNER}/{REPO}/pulls/{pr}/reviews",
             data={"event": "APPROVE"},
         )
 
     def merge_pr(self, pr: int) -> Any:
         "Merge a PR. Requires maintainer access to NixPkgs"
         print(f"Merging {pr_url(pr)}")
-        return self.put(f"/repos/NixOS/nixpkgs/pulls/{pr}/merge")
+        return self.put(f"/repos/{OWNER}/{REPO}/pulls/{pr}/merge")
 
     def graphql(self, query: str) -> dict[str, Any]:
         resp = self.post("/graphql", data={"query": query})
@@ -103,7 +109,7 @@ class GithubClient:
 
     def pull_request(self, number: int) -> Any:
         "Get a pull request"
-        return self.get(f"repos/NixOS/nixpkgs/pulls/{number}")
+        return self.get(f"repos/{OWNER}/{REPO}/pulls/{number}")
 
     def get_json_from_artifact(self, workflow_id: int, json_filename: str) -> Any:
         """
@@ -208,3 +214,12 @@ class GithubClient:
                     )
 
         return None
+
+    def upload_gist(self, name: str, content: str, description: str) -> dict[str, Any]:
+        data = {
+            "files": {name: {"content": content}},
+            "public": True,
+            "description": description,
+        }
+        resp: dict[str, Any] = self.post("/gists", data=data)
+        return resp

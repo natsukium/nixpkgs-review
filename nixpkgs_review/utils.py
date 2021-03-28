@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+import time
 from pathlib import Path
 from typing import IO, Any
 
@@ -30,10 +31,32 @@ link = color_text(34)
 
 
 def sh(
-    command: list[str], cwd: Path | str | None = None
+    command: list[str],
+    cwd: Path | str | None = None,
+    stdout: Any = None,
+    stderr: Any = None,
+    input: str | None = None,
+    **kwargs,
 ) -> "subprocess.CompletedProcess[str]":
+    start_time = time.time()
     info("$ " + shlex.join(command))
-    return subprocess.run(command, cwd=cwd, text=True, check=False)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        return subprocess.run(  # type: ignore
+            command,
+            cwd=cwd,
+            text=True,
+            check=False,
+            stdout=stdout,
+            stderr=stderr,
+            input=input,
+            **kwargs,
+        )
+    finally:
+        elapsed = time.time() - start_time
+        if elapsed > 120.0:
+            info(f"{command[0]} subprocess took {elapsed:.1f} sec")
 
 
 def verify_commit_hash(commit: str) -> str:
