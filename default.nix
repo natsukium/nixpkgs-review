@@ -13,7 +13,7 @@ python3.pkgs.buildPythonApplication {
   src = ./.;
   format = "pyproject";
   nativeBuildInputs = [ installShellFiles ] ++ lib.optional withAutocomplete python3.pkgs.argcomplete;
-  propagatedBuildInputs = [ python3.pkgs.argcomplete ];
+  propagatedBuildInputs = [ python3.pkgs.argcomplete python3.pkgs.humanize python3.pkgs.backoff ];
 
   nativeCheckInputs = [
     python3.pkgs.setuptools
@@ -34,7 +34,7 @@ python3.pkgs.buildPythonApplication {
   '';
   makeWrapperArgs =
     let
-      binPath = [ pkgs.nixVersions.stable or nix_2_4 git ]
+      binPath = [ pkgs.nixVersions.stable or nix_2_4 git coreutils ]
         ++ lib.optional withSandboxSupport bubblewrap
         ++ lib.optional withNom' nix-output-monitor;
     in

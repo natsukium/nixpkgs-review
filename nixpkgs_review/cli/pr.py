@@ -38,7 +38,7 @@ def pr_command(args: argparse.Namespace) -> str:
         CheckoutOption.MERGE if args.checkout == "merge" else CheckoutOption.COMMIT
     )
 
-    if args.post_result:
+    if args.post_result or args.post_logs:
         ensure_github_token(args.token)
 
     contexts = []
@@ -79,7 +79,9 @@ def pr_command(args: argparse.Namespace) -> str:
         assert review is not None
 
         all_succeeded = all(
-            review.start_review(attrs, path, pr, args.post_result, args.print_result)
+            review.start_review(
+                attrs, path, pr, args.post_result, args.print_result, args.post_logs
+            )
             for pr, path, attrs in contexts
         )
 

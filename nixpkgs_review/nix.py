@@ -1,9 +1,12 @@
+import functools
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from sys import platform
 from tempfile import NamedTemporaryFile
@@ -22,7 +25,9 @@ class Attr:
     blacklisted: bool
     path: str | None
     drv_path: str | None
+    log_url: str | None = field(default=None)
     aliases: list[str] = field(default_factory=lambda: [])
+    build_err_msg: str | None = field(default=None)
     _path_verified: bool | None = field(init=False, default=None)
 
     def was_build(self) -> bool:
@@ -50,6 +55,71 @@ class Attr:
 
     def is_test(self) -> bool:
         return self.name.startswith("nixosTests")
+
+    def log(self, tail: int = -1, strip_colors: bool = False) -> str | None:
+        def get_log(path: str | None) -> str | None:
+            if path is None:
+                return None
+            system = subprocess.run(
+                ["nix", "--experimental-features", "nix-command", "log", path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                errors="backslashreplace",
+            )
+            stdout = system.stdout
+            if tail > 0 and len(stdout) > tail:
+                stdout = "This file has been truncated\n" + stdout[-tail:]
+
+            if strip_colors:
+                return strip_ansi_colors(stdout)
+            return stdout
+
+        if self.drv_path is None:
+            return None
+
+        value = get_log(self.drv_path) or get_log(self.path) or ""
+        if self.build_err_msg is not None:
+            value = "\n".join([value, self.build_err_msg])
+
+        return value
+
+    def log_path(self) -> str | None:
+        if self.drv_path is None:
+            return None
+        base = os.path.basename(self.drv_path)
+
+        # TODO: On non-default configurations of nix, the logs
+        # could be stored in a different directory. We lack a
+        # robust way to discover this, which will prevent this
+        # function from finding the path (currently used only to
+        # determine the build time).
+        prefix = "/nix/var/log/nix/drvs/"
+        candidate_paths = (
+            os.path.join(prefix, base[:2], base[2:] + ".bz2"),
+            os.path.join(prefix, base[:2], base[2:]),
+        )
+        for path in candidate_paths:
+            if os.path.isfile(path):
+                return path
+        return None
+
+    def build_time(self) -> timedelta | None:
+        log_path = self.log_path()
+        if log_path is None:
+            return None
+
+        proc = subprocess.run(
+            ["stat", "--format", "%W %Y", log_path],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if proc.returncode == 0:
+            birthtime, mtime = map(int, proc.stdout.split())
+            if birthtime != 0:
+                return timedelta(seconds=(mtime - birthtime))
+        return None
 
 
 REVIEW_SHELL: Final[str] = str(ROOT.joinpath("nix/review-shell.nix"))
@@ -318,6 +388,32 @@ def nix_build(
     ) + shlex.split(args)
 
     sh(command)
+    proc = sh(command, stderr=subprocess.PIPE)
+    stderr = proc.stderr
+    # Remove boring 'copying path' lines from stderr
+    nix_store = _store_dir()
+    stderr = "\n".join(
+        line
+        for line in stderr.splitlines()
+        if not (line.startswith("copying path '") and line.endswith("..."))
+    )
+
+    has_failed_dependencies = []
+    for line in stderr.splitlines():
+        if "dependencies couldn't be built" in line:
+            has_failed_dependencies.append(
+                next(item for item in line.split() if nix_store in item)
+                .lstrip("'")
+                .rstrip(":'")
+            )
+
+    drv_path_to_attr = {a.drv_path: a for a in attrs}
+
+    for drv_path in has_failed_dependencies:
+        if drv_path in drv_path_to_attr:
+            attr = drv_path_to_attr[drv_path]
+            attr.build_err_msg = stderr
+
     return attrs
 
 
@@ -344,3 +440,39 @@ def build_shell_file_args(
         "attrs-path",
         str(attrs_file),
     ]
+
+
+def strip_ansi_colors(s: str) -> str:
+    # https://stackoverflow.com/a/14693789/1079728
+    # 7-bit C1 ANSI sequences
+    ansi_escape = re.compile(
+        r"""
+        \x1B  # ESC
+        (?:   # 7-bit C1 Fe (except CSI)
+            [@-Z\\-_]
+        |     # or [ for CSI, followed by a control sequence
+            \[
+            [0-?]*  # Parameter bytes
+            [ -/]*  # Intermediate bytes
+            [@-~]   # Final byte
+        )
+    """,
+        re.VERBOSE,
+    )
+    return ansi_escape.sub("", s)
+
+
+@functools.lru_cache()
+def _store_dir() -> str:
+    return subprocess.check_output(
+        [
+            "nix",
+            "--experimental-features",
+            "nix-command",
+            "eval",
+            "--raw",
+            "--expr",
+            "(builtins.storeDir)",
+        ],
+        text=True,
+    )
