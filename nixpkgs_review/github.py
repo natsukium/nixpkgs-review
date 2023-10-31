@@ -21,7 +21,8 @@ class GithubClient:
             # => _owner = "NixOS", _repo = "nixpkgs"
             self._owner, self._repo = match.groups()
         else:
-            raise ValueError(f"Unparsable remote: {remote}")
+            print(f"Unparsable remote: {remote}, fallback to NixOS/nixpkgs")
+            self._owner, self._repo = ("NixOS", "nixpkgs")
 
     def _pr_url(self, pr: int) -> str:
         return f"https://github.com/{self._owner}/{self._repo}/pull/{pr}"
