@@ -129,7 +129,9 @@ class Report:
             self.extra_nixpkgs_config = None
 
         for a in attrs:
-            if a.broken:
+            if a.name.endswith(".dist"):
+                continue
+            elif a.broken:
                 self.broken.append(a)
             elif a.blacklisted:
                 self.blacklisted.append(a)
