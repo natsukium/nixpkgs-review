@@ -105,7 +105,9 @@ class SystemReport:
         self.built: list[Attr] = []
 
         for attr in attrs:
-            if attr.broken:
+            if attr.name.endswith(".dist"):
+                continue
+            elif attr.broken:
                 self.broken.append(attr)
             elif attr.blacklisted:
                 self.blacklisted.append(attr)
