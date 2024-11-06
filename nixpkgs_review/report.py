@@ -68,7 +68,9 @@ class LazyDirectory:
         return self.path
 
 
-def write_result_links(attrs_per_system: dict[str, list[Attr]], directory: Path) -> None:
+def write_result_links(
+    attrs_per_system: dict[str, list[Attr]], directory: Path
+) -> None:
     results = LazyDirectory(directory.joinpath("results"))
     failed_results = LazyDirectory(directory.joinpath("failed_results"))
     for system, attrs in attrs_per_system.items():
@@ -87,18 +89,6 @@ def write_result_links(attrs_per_system: dict[str, list[Attr]], directory: Path)
                 if os.path.lexists(symlink_source):
                     symlink_source.unlink()
                 symlink_source.symlink_to(attr.path)
-
-
-def write_error_logs(attrs_per_system: dict[str, list[Attr]], directory: Path) -> None:
-    logs = LazyDirectory(directory.joinpath("logs"))
-
-    for system, attrs in attrs_per_system.items():
-        for attr in attrs:
-            attr_name: str = f"{attr.name}-{system}"
-            with open(logs.ensure().joinpath(attr_name + ".log"), "w+", encoding="utf-8") as f:
-                log_content = attr.log()
-                if log_content is not None:
-                    f.write(log_content)
 
 
 def _serialize_attrs(attrs: list[Attr]) -> list[str]:
@@ -150,6 +140,22 @@ def order_reports(reports: dict[System, SystemReport]) -> dict[System, SystemRep
     )
 
 
+def write_error_logs(
+    system_report_per_system: dict[System, SystemReport], directory: Path
+) -> None:
+    logs = LazyDirectory(directory.joinpath("logs"))
+
+    for system, system_report in system_report_per_system.items():
+        for attr in system_report.failed:
+            attr_name: str = f"{attr.name}-{system}"
+            with open(
+                logs.ensure().joinpath(attr_name + ".log"), "w+", encoding="utf-8"
+            ) as f:
+                log_content = attr.log()
+                if log_content is not None:
+                    f.write(log_content)
+
+
 class Report:
     def __init__(
         self,
@@ -185,34 +191,35 @@ class Report:
             f.write(self.json(pr))
 
         write_result_links(self.attrs, directory)
-        write_error_logs(self.failed, directory)
+        write_error_logs(self.system_reports, directory)
 
     def succeeded(self) -> bool:
         """Whether the report is considered a success or a failure"""
         return all((len(report.failed) == 0) for report in self.system_reports.values())
 
     def upload_build_logs(self, github_client: GithubClient, pr: int | None) -> None:
-        for pkg in self.failed:
-            log_content = pkg.log(tail=1 * 1024 * 1014, strip_colors=True)
-            build_time = pkg.build_time()
-            description = f"system: {self.system}"
-            if build_time is not None:
-                description += f" | build_time: {naturaldelta(build_time)}"
-            if pr is not None:
-                description += f" | https://github.com/NixOS/nixpkgs/pull/{pr}"
+        for system, reports in self.system_reports.items():
+            for pkg in reports.failed:
+                log_content = pkg.log(tail=1 * 1024 * 1014, strip_colors=True)
+                build_time = pkg.build_time()
+                description = f"system: {system}"
+                if build_time is not None:
+                    description += f" | build_time: {naturaldelta(build_time)}"
+                if pr is not None:
+                    description += f" | https://github.com/NixOS/nixpkgs/pull/{pr}"
 
-            if log_content is not None and len(log_content) > 0:
-                try:
-                    gist = github_client.upload_gist(
-                        name=pkg.name, content=log_content, description=description
-                    )
-                    pkg.log_url = gist["html_url"]
-                except urllib.error.HTTPError:
-                    # This is possible due to rate-limiting or a failure of that sort.
-                    # It should not be fatal.
-                    traceback.print_exc(file=sys.stderr)
-            else:
-                print(f"Log content for {pkg} was empty", file=sys.stderr)
+                if log_content is not None and len(log_content) > 0:
+                    try:
+                        gist = github_client.upload_gist(
+                            name=pkg.name, content=log_content, description=description
+                        )
+                        pkg.log_url = gist["html_url"]
+                    except urllib.error.HTTPError:
+                        # This is possible due to rate-limiting or a failure of that sort.
+                        # It should not be fatal.
+                        traceback.print_exc(file=sys.stderr)
+                else:
+                    print(f"Log content for {pkg} was empty", file=sys.stderr)
 
     def json(self, pr: int | None) -> str:
         return json.dumps(
